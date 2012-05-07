@@ -42,27 +42,30 @@ Holds integers for intermediate computation. May be multiple; switched with DBuf
 *** Instruction buffer
 Holds the main program. If the instruction buffer empties, then a new program is injected from the pool.
 ** Control Instructions
-*** Data <value>
-Adds <value> to the front of the stack. Data are always integers; instructions always use the instruction buffer.
 *** DBufL
 The program's neighboring buffers are arranged in a cyclic chain starting with the local one. Move the data buffer right.
 *** DBufR
 *** IBufL
 *** IBufR
 *** Push
-Sends the front of the data buffer to the destination. Use instruction buffer if data buffer is empty. A no-op if the local buffer.
+Pop the front of the data buffer and send it to the destination. Use instruction buffer if data buffer is empty. A no-op if the local buffer.
 *** Pull
 Grabs the front of the destination's data buffer to the local one. If the data buffer is empty, use the instruction buffers. If both of those are empty, no-op. If the destination is the local buffer, no-op.
 *** Clone
 Clones the front of the local data buffer to the destination.
 *** Execute
-Executes the target instruction buffer. Remember that source/target are per-node not per-(instruction buffer).
+Executes the target instruction buffer using the destination data buffer as local source. 
 *** IfZero
 Pop the data buffer and see if it's non-zero. If so, then pop the instruction buffer until an "End" is found.
+*** Ascend
+Pushes the rest of the source instruction & data buffers into the parent. This kills the current instance, but he is reborn anew into his parent.
 ** Arithmetic Instructions
 *** Nullary
 **** Neighbors 
 The number of buffers is pushed to the data buffer.
+**** Data <value>
+Adds <value> to the front of the stack. Data are always integers; instructions always use the instruction buffer.
+
 *** Unary
 Each of these pops a single data item from the source data buffer, and pushes a new one to the destination buffer. If there is no data, then no-op.
 **** Identity - Returns its argument
@@ -72,8 +75,8 @@ Each of these pops a single data item from the source data buffer, and pushes a 
 *** Binary
 **** Sum
 **** Subtract
-**** BitAnd
-**** BitOr
-**** BitXor
+**** And
+**** Or
+**** Xor
 *** Ternary
 **** Cond - x ? y : z
