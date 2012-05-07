@@ -1,0 +1,79 @@
+* Assembly language for genetically engineered programs
+Must be:
+** Compositional
+A . B encourages code reuse
+** Goal-oriented
+You should be able to evolve code to satisfy any predicate
+*** Define dozens of predicates your goal should satisfy, and it will attempt to create a program QuickCheck-style?
+**** Can QuickCheck be used for this?
+We could probably use QuickCheck to test individual programs.
+** Turing-Complete
+This links in with the "any predicate" condition
+** Safe
+A single program shouldn't be able to consume the entire CPU.
+*** Maybe use ForkIO for these?
+* Environment
+** In case of a conflict, the program with the higher rating wins.
+Given two programs A & B, A can have a higher rating than B but still lose because its program loses out in terms of resources.
+** Every so often, the bottom x% of ranked programs are purged from the environment.
+This is a slight encouragement to encourage higher ranked programs
+** Every so often, x% of 'similar' programs are destroyed.
+*** What makes two programs 'similar'? Compare ASTs?
+** The world consists of various nodes on a graph which are connected in some patterns.
+   
+* Configurable parameters
+** Use-specific 
+*** Ranking predicates
+*** Injecting new programs from the pool
+**** What % each cycle is a new program injected?
+**** When it's decided to inject, how to weigh all the candidates?
+** VM-specific
+*** Node connection settings
+*** The assembly language itself
+*** % of bottom ranked programs purged
+*** % of similar programs purged
+*** Similarity ranking program
+*** Mutation rate
+
+* Assembly specification
+** Environment
+*** Data buffers
+Holds integers for intermediate computation. May be multiple; switched with DBufL, DBufR. Always a canonical one used for source, though temporary ones for destinations can still be useful.
+*** Instruction buffer
+Holds the main program. If the instruction buffer empties, then a new program is injected from the pool.
+** Control Instructions
+*** Data <value>
+Adds <value> to the front of the stack. Data are always integers; instructions always use the instruction buffer.
+*** DBufL
+The program's neighboring buffers are arranged in a cyclic chain starting with the local one. Move the data buffer right.
+*** DBufR
+*** IBufL
+*** IBufR
+*** Push
+Sends the front of the data buffer to the destination. Use instruction buffer if data buffer is empty. A no-op if the local buffer.
+*** Pull
+Grabs the front of the destination's data buffer to the local one. If the data buffer is empty, use the instruction buffers. If both of those are empty, no-op. If the destination is the local buffer, no-op.
+*** Clone
+Clones the front of the local data buffer to the destination.
+*** Execute
+Executes the target instruction buffer. Remember that source/target are per-node not per-(instruction buffer).
+*** IfZero
+Pop the data buffer and see if it's non-zero. If so, then pop the instruction buffer until an "End" is found.
+** Arithmetic Instructions
+*** Nullary
+**** Neighbors 
+The number of buffers is pushed to the data buffer.
+*** Unary
+Each of these pops a single data item from the source data buffer, and pushes a new one to the destination buffer. If there is no data, then no-op.
+**** Identity - Returns its argument
+**** Not - If 0, then 1. Else, 0.
+**** Increment
+**** Decrement
+*** Binary
+**** Sum
+**** Subtract
+**** BitAnd
+**** BitOr
+**** BitXor
+*** Ternary
+**** Cond - x ? y : z
