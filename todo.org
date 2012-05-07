@@ -52,9 +52,9 @@ Pop the front of the data buffer and send it to the destination. Use instruction
 *** Pull
 Grabs the front of the destination's data buffer to the local one. If the data buffer is empty, use the instruction buffers. If both of those are empty, no-op. If the destination is the local buffer, no-op.
 *** Clone
-Clones the front of the local data buffer to the destination.
+Clones the front of the local data buffer to the destination. If empty, clones the instruction buffer.
 *** Execute
-Executes the target instruction buffer using the destination data buffer as local source. 
+Executes the target instruction buffer using the destination data buffer as local source. Additionally, the instruction and data pointers are reset to 0.
 *** IfZero
 Pop the data buffer and see if it's non-zero. If so, then pop the instruction buffer until an "End" is found.
 *** Ascend
