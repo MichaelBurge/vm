@@ -161,14 +161,13 @@ execute b = do
          dPtr = 0,
          iPtr = 0
         }
-{--
--- |Pops the data buffer to see if non-zero. If so, then pop the instruction buffer until an End is found.
-ifZero :: State Node ()
-ifZero d i = do
-  val <- peekDBuf d
-  if val /= 0
-     then do iCheck <- popIFrom i
---}          
+
+-- |Pops the data buffer to see if non-zero. If so, then pop the instruction buffer.
+ifZero :: Integer -> Integer -> State Node ()
+ifZero d i = peekDFrom d >>= \val -> case val of
+  Just x -> unless (x == 0) (popIFrom i >> return ())
+  Nothing -> return ()
+
 -- |Run the provided instruction against the node's context.
 process :: Instruction -> State Node ()
 process i = do
@@ -184,3 +183,4 @@ process i = do
     Clone  -> clone    (0, dPtr st) (0, iPtr st)
     Pull   -> transfer (dPtr st, 0) (iPtr st, 0)
     Execute-> execute $ iPtr st
+    IfZero -> ifZero 0 0
