@@ -14,11 +14,11 @@ data Instruction
     | Execute -- ^ Executes the target instruction buffer using the destination data buffer as local source. Additionally, the instruction and data pointers are reset to 0.
     | IfZero -- ^ Pop the data buffer and see if it's non-zero or empty. If so, then pop the instruction buffer. 
     | Ascend -- ^ Pushes the rest of the source instruction & data buffers into the parent. This kills the current instance, but he is reborn anew into his parent.
--- | Each of these pops from the source data buffer, and pushes to the destination buffer. If there is not enough data, then no-op.
-    | Neighbors -- ^ Push the number of data buffers to the destination data buffer.
+    | Die     -- ^ You're done with your work here. Ask the VM to inject a new program.
+    | Neighbors -- ^ Each of these arithmetic instructions pops from the source data buffer, and pushes to the destination buffer. If there is not enough data, then no-op. Push the number of data buffers to the destination data buffer.
     | Data Integer -- ^ Send the given integer.
-    | Identity -- ^ Send argument to destination.
-    | Not -- ^ If arg is 0, then send 1. Otherwise, send 0.
+    | Identity  -- ^ Send argument to destination.
+    | Not       -- ^ If arg is 0, then send 1. Otherwise, send 0.
     | Increment -- ^ Increment arg and send.
     | Decrement -- ^ Decrement arg and send.
     | Sum       -- ^ Add both args and send.
@@ -27,6 +27,7 @@ data Instruction
     | Or        -- ^ Bitwise OR of both argumenst
     | Xor       -- ^ Bitwise XOR of both arguments
     | Cond      -- ^ Arg1 ? Arg2 : Arg3
+
       deriving (Eq, Show)
 
 -- |Sum type of all buffers used in a node.
@@ -149,10 +150,9 @@ swap :: Integer -> Integer -> [a] -> [a]
 swap 0 n ys = (ys !! (fromIntegral n)):(tail $ take (fromIntegral n) ys) ++ ((head ys):(drop (fromIntegral n) ys))
 swap x n (y:ys) = y:(swap (x-1) (n-1) ys)
 
--- |Executes the target buffer. The child process' buffers may be reordered.
--- TODO: Check execute if I finished it or not...
-execute :: Integer -> State Node ()
-execute b = do
+-- |Executes the target instruction with the source buffer. The child process' buffers may be reordered.
+execute :: Integer -> Integer -> State Node ()
+execute d i = do
   st <- get
   let newBuffers =  (swap 0 (dPtr st) $ filter (isDBuf) $ buffers st)
                  ++ (swap 0 (iPtr st) $ filter (isIBuf) $ buffers st)
@@ -168,12 +168,25 @@ ifZero d i = peekDFrom d >>= \val -> case val of
   Just x -> unless (x == 0) (popIFrom i >> return ())
   Nothing -> return ()
 
--- |Run the provided instruction against the node's context.
+-- | Concatenate two buffers, throwing a runtime error if they're of different types.
+joinBuffers :: Buffer -> Buffer -> Buffer
+joinBuffers (DBuf a) (DBuf b) = DBuf (a ++ b)
+joinBuffers (IBuf a) (IBuf b) = IBuf (a ++ b)
+joinBuffers _ _ = error "Incompatible buffer types in joinBuffer"
+
+mergeInto :: Node -> State Node ()
+mergeInto n = do
+  st <- get
+  put n
+  execute (dPtr n) (iPtr n)
+  put n{buffers = (joinBuffers (head (buffers st)) (head (buffers n))):(tail $ buffers n)
+       }
+
+-- | Run the provided instruction against the node's context.
 process :: Instruction -> State Node ()
 process i = do
   st <- get
   case i of
-    Data n -> pushDTo 0 n
 -- TODO: Wrap these modulo data/instruction buffer lengths.
     DBufL  -> put $ st{dPtr = (dPtr st) - 1}
     DBufR  -> put $ st{dPtr = (dPtr st) + 1}
@@ -182,5 +195,12 @@ process i = do
     Push   -> transfer (0, dPtr st) (0, iPtr st)
     Clone  -> clone    (0, dPtr st) (0, iPtr st)
     Pull   -> transfer (dPtr st, 0) (iPtr st, 0)
-    Execute-> execute $ iPtr st
+    Execute-> execute (dPtr st) (iPtr st)
     IfZero -> ifZero 0 0
+    Ascend -> mergeInto $ parent st
+    Neighbors -> pushDTo 0 $ fromIntegral $ length $ filter isDBuf $ buffers st
+    Data n -> pushDTo 0 n
+    Identity -> popDFrom 0 >>= \x ->
+                case x of
+                  Just a -> pushDTo (dPtr st) a
+                  Nothing -> return ()
