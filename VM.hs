@@ -4,30 +4,31 @@ module VM where
 import Control.Monad.State
 import Safe
 data Instruction
-    = DBufL -- ^ Move the destination data buffer pointer left.
-    | DBufR -- ^ Move the destination data buffer pointer right.
-    | IBufL -- ^ Move the destination instruction buffer pointer left.
-    | IBufR -- ^ Move the destination instruction buffer pointer right.
-    | Push  -- ^ Pop the front of the local data buffer and send it to the destination. Use instruction buffer if data buffer is empty. A no-op if the local buffer.
-    | Pull  -- ^ Pop the front of the destination data buffer and sends it to the local data buffer. Uses instruction buffer if data buffer is empty. A no-op if the local buffer.
-    | Clone -- ^ Clones the front of the local data buffer to the destination. If empty, clones the instruction buffer. 
-    | Execute -- ^ Executes the target instruction buffer using the destination data buffer as local source. Additionally, the instruction and data pointers are reset to 0.
-    | IfZero -- ^ Pop the data buffer and see if it's non-zero or empty. If so, then pop the instruction buffer. 
-    | Ascend -- ^ Pushes the rest of the source instruction & data buffers into the parent. This kills the current instance, but he is reborn anew into his parent.
-    | Die     -- ^ You're done with your work here. Ask the VM to inject a new program.
-    | Neighbors -- ^ Each of these arithmetic instructions pops from the source data buffer, and pushes to the destination buffer. If there is not enough data, then no-op. Push the number of data buffers to the destination data buffer.
+    = DBufL        -- ^ Move the destination data buffer pointer left.
+    | DBufR        -- ^ Move the destination data buffer pointer right.
+    | IBufL        -- ^ Move the destination instruction buffer pointer left.
+    | IBufR        -- ^ Move the destination instruction buffer pointer right.
+    | Push         -- ^ Pop the front of the local data buffer and send it to the destination. Use instruction buffer if data buffer is empty. A no-op if the local buffer.
+    | Pull         -- ^ Pop the front of the destination data buffer and sends it to the local data buffer. Uses instruction buffer if data buffer is empty. A no-op if the local buffer.
+    | Clone        -- ^ Clones the front of the local data buffer to the destination. If empty, clones the instruction buffer. 
+    | Execute      -- ^ Executes the target instruction buffer using the destination data buffer as local source. Additionally, the instruction and data pointers are reset to 0.
+    | IfZero       -- ^ Pop the data buffer and see if it's non-zero or empty. If so, then pop the instruction buffer. 
+    | Ascend       -- ^ Pushes the rest of the source instruction & data buffers into the parent. This kills the current instance, but he is reborn anew into his parent.
+    | Die          -- ^ You're done with your work here. Ask the VM to inject a new program.
+    | Neighbors    -- ^ Each of these arithmetic instructions pops from the source data buffer, and pushes to the destination buffer. If there is not enough data, then no-op. Push the number of data buffers to the destination data buffer.
     | Data Integer -- ^ Send the given integer.
-    | Identity  -- ^ Send argument to destination.
-    | Not       -- ^ If arg is 0, then send 1. Otherwise, send 0.
-    | Increment -- ^ Increment arg and send.
-    | Decrement -- ^ Decrement arg and send.
-    | Sum       -- ^ Add both args and send.
-    | Subtract  -- ^ Subtract 2nd arg from first and send.
-    | And       -- ^ Bitwise AND of both arguments
-    | Or        -- ^ Bitwise OR of both argumenst
-    | Xor       -- ^ Bitwise XOR of both arguments
-    | Cond      -- ^ Arg1 ? Arg2 : Arg3
-
+    | Identity     -- ^ Send argument to destination.
+    | Not          -- ^ If arg is 0, then send 1. Otherwise, send 0.
+    | Increment    -- ^ Increment arg and send.
+    | Decrement    -- ^ Decrement arg and send.
+    | DBufSize     -- ^ Gets the size of the data buffer pointed to.
+    | IBufSIze     -- ^ Gets the size of the instruction buffer pointed to.
+    | Sum          -- ^ Add both args and send.
+    | Subtract     -- ^ Subtract 2nd arg from first and send.
+    | And          -- ^ Bitwise AND of both arguments
+    | Or           -- ^ Bitwise OR of both argumenst
+    | Xor          -- ^ Bitwise XOR of both arguments
+    | Cond         -- ^ Arg1 ? Arg2 : Arg3
       deriving (Eq, Show)
 
 -- |Sum type of all buffers used in a node.
@@ -52,6 +53,10 @@ dAp f = let g (DBuf xs) = DBuf $ f xs in g
 iAp :: ([Instruction] -> [Instruction]) -> (Buffer -> Buffer)
 iAp f = let g (IBuf xs) = IBuf $ f xs in g
 
+aAp :: ([Integer] -> b) -> Buffer -> b
+aAp f (DBuf xs) = f xs
+aAp _ _ = error "bAp applied to non-integral list"
+
 -- |Fully defines the execution context for a node in the environment graph.
 data Node = Node {
       parent :: Node,
@@ -59,6 +64,17 @@ data Node = Node {
       dPtr :: Integer,
       iPtr :: Integer
 }
+
+atWrap :: [a] -> Integer -> a
+atWrap xs n = xs !! ((fromIntegral n) `mod` (length xs))
+
+bufferSize :: (Buffer -> Bool) -> Integer -> State Node Integer
+bufferSize pred n = do
+  st <- get
+  return $ fromIntegral
+         $ aAp length
+         $ atWrap (filter pred (buffers st))
+         $ fromIntegral n
 
 -- |Filter the buffers with a predicate, apply the transformation to the n'th remaining, and return the transformed buffer list.
 modBuffers :: (Buffer -> Bool) -> Integer -> (Buffer -> Buffer) -> State Node Buffer
@@ -74,7 +90,7 @@ modBuffers pred n trans =
           let (newBufs, ret) = f n $ buffers st
           put st{buffers = newBufs}
           return ret
-  
+
 -- |Transforms the n'th data buffer.
 modData :: Integer -> (Buffer -> Buffer) -> State Node Buffer
 modData = modBuffers isDBuf
@@ -182,25 +198,67 @@ mergeInto n = do
   put n{buffers = (joinBuffers (head (buffers st)) (head (buffers n))):(tail $ buffers n)
        }
 
+arith0 :: (Node -> Integer) -> State Node ()
+arith0 f = do
+  st <- get
+  pushDTo (dPtr st) $ f st
+
+arith1 :: (Node -> Integer -> Integer) -> State Node ()
+arith1 f = do
+  st <- get
+  a <- popDFrom 0
+  maybe (return ()) 
+        (pushDTo (dPtr st) . f st) 
+        a
+{-
+arith2 :: (Node -> Integer -> Integer -> Integer) -> State Node ()
+arith2 f = do
+  st <- get
+  a <- popDFrom 0
+  b <- popDFrom 0
+  maybe (return ())
+        (maybe (return ())
+               ((pushDTo (dPtr st) . f st))
+               a
+        ) b
+arith3 :: (Node -> Integer -> Integer -> Integer -> Integer) -> State Node ()
+arith3 f = do
+  st <- get
+  a <- popDFrom 0
+  b <- popDFrom 0
+  c <- popDFrom 0
+  pushDTo (dPtr st) $ f st a b c
+-}
 -- | Run the provided instruction against the node's context.
 process :: Instruction -> State Node ()
 process i = do
   st <- get
   case i of
 -- TODO: Wrap these modulo data/instruction buffer lengths.
-    DBufL  -> put $ st{dPtr = (dPtr st) - 1}
-    DBufR  -> put $ st{dPtr = (dPtr st) + 1}
-    IBufL  -> put $ st{iPtr = (iPtr st) - 1}
-    IBufR  -> put $ st{iPtr = (iPtr st) + 1}
-    Push   -> transfer (0, dPtr st) (0, iPtr st)
-    Clone  -> clone    (0, dPtr st) (0, iPtr st)
-    Pull   -> transfer (dPtr st, 0) (iPtr st, 0)
-    Execute-> execute (dPtr st) (iPtr st)
-    IfZero -> ifZero 0 0
-    Ascend -> mergeInto $ parent st
+    DBufL     -> put $ st{dPtr = (dPtr st) - 1}
+    DBufR     -> put $ st{dPtr = (dPtr st) + 1}
+    IBufL     -> put $ st{iPtr = (iPtr st) - 1}
+    IBufR     -> put $ st{iPtr = (iPtr st) + 1}
+    Push      -> transfer (0, dPtr st) (0, iPtr st)
+    Clone     -> clone    (0, dPtr st) (0, iPtr st)
+    Pull      -> transfer (dPtr st, 0) (iPtr st, 0)
+    Execute   -> execute (dPtr st) (iPtr st)
+    IfZero    -> ifZero 0 0
+    Ascend    -> mergeInto $ parent st
     Neighbors -> pushDTo 0 $ fromIntegral $ length $ filter isDBuf $ buffers st
-    Data n -> pushDTo 0 n
-    Identity -> popDFrom 0 >>= \x ->
-                case x of
-                  Just a -> pushDTo (dPtr st) a
-                  Nothing -> return ()
+    Data n    -> pushDTo 0 n
+    Identity  -> popDFrom 0 >>= \x ->
+                 case x of
+                   Just a -> pushDTo (dPtr st) a
+                   Nothing -> return ()
+    Not       -> return ()
+    Increment -> return ()
+    Decrement -> return ()
+    DBufSize  -> return ()
+    IBufSIze  -> return ()
+    Sum       -> return ()
+    Subtract  -> return ()
+    And       -> return ()
+    Or        -> return ()
+    Xor       -> return ()
+    Cond      -> return ()
