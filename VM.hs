@@ -2,7 +2,9 @@
 -}
 module VM where
 import Control.Monad.State
+import Data.Maybe
 import Safe
+
 data Instruction
     = DBufL        -- ^ Move the destination data buffer pointer left.
     | DBufR        -- ^ Move the destination data buffer pointer right.
@@ -64,6 +66,7 @@ data Node = Node {
       dPtr :: Integer,
       iPtr :: Integer
 }
+type NodeS a = State Node a
 
 atWrap :: [a] -> Integer -> a
 atWrap xs n = xs !! ((fromIntegral n) `mod` (length xs))
@@ -198,37 +201,15 @@ mergeInto n = do
   put n{buffers = (joinBuffers (head (buffers st)) (head (buffers n))):(tail $ buffers n)
        }
 
-arith0 :: (Node -> Integer) -> State Node ()
-arith0 f = do
+-- | Defines an arithmetic operation that takes the specified number of arguments. If any element is Nothing, then the operation is a no-op.
+arith :: Int -> (Node -> [Integer] -> Integer) -> State Node ()
+arith n f = do
   st <- get
-  pushDTo (dPtr st) $ f st
+  args <- sequence $ replicate n (popDFrom $ dPtr st)
+  if all isJust args
+     then pushDTo (dPtr st) $ f st $ catMaybes args
+     else put st
 
-arith1 :: (Node -> Integer -> Integer) -> State Node ()
-arith1 f = do
-  st <- get
-  a <- popDFrom 0
-  maybe (return ()) 
-        (pushDTo (dPtr st) . f st) 
-        a
-{-
-arith2 :: (Node -> Integer -> Integer -> Integer) -> State Node ()
-arith2 f = do
-  st <- get
-  a <- popDFrom 0
-  b <- popDFrom 0
-  maybe (return ())
-        (maybe (return ())
-               ((pushDTo (dPtr st) . f st))
-               a
-        ) b
-arith3 :: (Node -> Integer -> Integer -> Integer -> Integer) -> State Node ()
-arith3 f = do
-  st <- get
-  a <- popDFrom 0
-  b <- popDFrom 0
-  c <- popDFrom 0
-  pushDTo (dPtr st) $ f st a b c
--}
 -- | Run the provided instruction against the node's context.
 process :: Instruction -> State Node ()
 process i = do
