@@ -2,6 +2,7 @@
 -}
 module VM where
 import Control.Monad.State
+import Data.Bits
 import Data.Maybe
 import Safe
 
@@ -17,14 +18,14 @@ data Instruction
     | IfZero       -- ^ Pop the data buffer and see if it's non-zero or empty. If so, then pop the instruction buffer. 
     | Ascend       -- ^ Pushes the rest of the source instruction & data buffers into the parent. This kills the current instance, but he is reborn anew into his parent.
     | Die          -- ^ You're done with your work here. Ask the VM to inject a new program.
+    | DBufSize     -- ^ Gets the size of the data buffer pointed to.
+    | IBufSIze     -- ^ Gets the size of the instruction buffer pointed to.
     | Neighbors    -- ^ Each of these arithmetic instructions pops from the source data buffer, and pushes to the destination buffer. If there is not enough data, then no-op. Push the number of data buffers to the destination data buffer.
     | Data Integer -- ^ Send the given integer.
     | Identity     -- ^ Send argument to destination.
     | Not          -- ^ If arg is 0, then send 1. Otherwise, send 0.
     | Increment    -- ^ Increment arg and send.
     | Decrement    -- ^ Decrement arg and send.
-    | DBufSize     -- ^ Gets the size of the data buffer pointed to.
-    | IBufSIze     -- ^ Gets the size of the instruction buffer pointed to.
     | Sum          -- ^ Add both args and send.
     | Subtract     -- ^ Subtract 2nd arg from first and send.
     | And          -- ^ Bitwise AND of both arguments
@@ -38,14 +39,21 @@ data Buffer = DBuf [Integer]
             | IBuf [Instruction]
               deriving (Eq, Show)
 
--- |
+-- | Predicate for filtering out Data buffers from the main list.
 isDBuf :: Buffer -> Bool
 isDBuf (DBuf _) = True
 isDBuf _        = False
 
+-- | Predicate for filtering out Instruction buffers from the main list.
 isIBuf :: Buffer -> Bool
 isIBuf (IBuf _) = True
 isIBuf _        = False
+
+dBufs :: Node -> [Buffer]
+dBufs = filter isDBuf . buffers
+
+iBufs :: Node -> [Buffer]
+iBufs = filter isIBuf . buffers
 
 -- |Lifts the given list-processing function on integers to the Buffer type.
 dAp :: ([Integer] -> [Integer]) -> (Buffer -> Buffer)
@@ -202,12 +210,12 @@ mergeInto n = do
        }
 
 -- | Defines an arithmetic operation that takes the specified number of arguments. If any element is Nothing, then the operation is a no-op.
-arith :: Int -> (Node -> [Integer] -> Integer) -> State Node ()
+arith :: Int -> ([Integer] -> Integer) -> State Node ()
 arith n f = do
   st <- get
   args <- sequence $ replicate n (popDFrom $ dPtr st)
   if all isJust args
-     then pushDTo (dPtr st) $ f st $ catMaybes args
+     then pushDTo (dPtr st) $ f $ catMaybes args
      else put st
 
 -- | Run the provided instruction against the node's context.
@@ -226,20 +234,17 @@ process i = do
     Execute   -> execute (dPtr st) (iPtr st)
     IfZero    -> ifZero 0 0
     Ascend    -> mergeInto $ parent st
-    Neighbors -> pushDTo 0 $ fromIntegral $ length $ filter isDBuf $ buffers st
-    Data n    -> pushDTo 0 n
-    Identity  -> popDFrom 0 >>= \x ->
-                 case x of
-                   Just a -> pushDTo (dPtr st) a
-                   Nothing -> return ()
-    Not       -> return ()
-    Increment -> return ()
-    Decrement -> return ()
-    DBufSize  -> return ()
-    IBufSIze  -> return ()
-    Sum       -> return ()
-    Subtract  -> return ()
-    And       -> return ()
-    Or        -> return ()
-    Xor       -> return ()
-    Cond      -> return ()
+    DBufSize  -> pushDTo (dPtr st) =<< bufferSize isDBuf (dPtr st)
+    IBufSIze  -> pushDTo (dPtr st) =<< bufferSize isIBuf (iPtr st)
+    Neighbors -> arith 0 (\_        -> fromIntegral $ length $ dBufs st)
+    Data n    -> arith 0 (\_        -> n)
+    Identity  -> arith 1 (\(x:xs)   -> x)
+    Not       -> arith 1 (\(x:xs)   -> if x == 0 then 1 else 0)
+    Increment -> arith 1 (\(x:xs)   -> x + 1)
+    Decrement -> arith 1 (\(x:xs)   -> x - 1)
+    Sum       -> arith 2 (\(a:b:xs) -> a + b)
+    Subtract  -> arith 2 (\(a:b:xs) -> a - b)
+    And       -> arith 2 (\(a:b:xs) -> a .&. b)
+    Or        -> arith 2 (\(a:b:xs) -> a .|. b)
+    Xor       -> arith 2 (\(a:b:xs) -> a `xor` b)
+    Cond      -> arith 3 (\(a:b:c:xs) -> if a > 0 then b else c)
