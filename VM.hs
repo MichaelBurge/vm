@@ -1,35 +1,40 @@
+{- |The program's neighboring buffers are arranged in a cyclic chain starting with the local one.
+-}
 module VM where
 import Control.Monad.State
 import Safe
 data Instruction
-    = DBufL
-    | DBufR
-    | IBufL
-    | IBufR
-    | Push
-    | Pull
-    | Clone
-    | Execute
-    | IfZero
-    | Ascend
-    | Neighbors
-    | Data Integer
-    | Identity
-    | Not
-    | Increment
-    | Decrement
-    | Sum
-    | Subtract
-    | And
-    | Or
-    | Xor
-    | Cond
+    = DBufL -- ^ Move the destination data buffer pointer left.
+    | DBufR -- ^ Move the destination data buffer pointer right.
+    | IBufL -- ^ Move the destination instruction buffer pointer left.
+    | IBufR -- ^ Move the destination instruction buffer pointer right.
+    | Push  -- ^ Pop the front of the local data buffer and send it to the destination. Use instruction buffer if data buffer is empty. A no-op if the local buffer.
+    | Pull  -- ^ Pop the front of the destination data buffer and sends it to the local data buffer. Uses instruction buffer if data buffer is empty. A no-op if the local buffer.
+    | Clone -- ^ Clones the front of the local data buffer to the destination. If empty, clones the instruction buffer. 
+    | Execute -- ^ Executes the target instruction buffer using the destination data buffer as local source. Additionally, the instruction and data pointers are reset to 0.
+    | IfZero -- ^ Pop the data buffer and see if it's non-zero or empty. If so, then pop the instruction buffer. 
+    | Ascend -- ^ Pushes the rest of the source instruction & data buffers into the parent. This kills the current instance, but he is reborn anew into his parent.
+-- | Each of these pops from the source data buffer, and pushes to the destination buffer. If there is not enough data, then no-op.
+    | Neighbors -- ^ Push the number of data buffers to the destination data buffer.
+    | Data Integer -- ^ Send the given integer.
+    | Identity -- ^ Send argument to destination.
+    | Not -- ^ If arg is 0, then send 1. Otherwise, send 0.
+    | Increment -- ^ Increment arg and send.
+    | Decrement -- ^ Decrement arg and send.
+    | Sum       -- ^ Add both args and send.
+    | Subtract  -- ^ Subtract 2nd arg from first and send.
+    | And       -- ^ Bitwise AND of both arguments
+    | Or        -- ^ Bitwise OR of both argumenst
+    | Xor       -- ^ Bitwise XOR of both arguments
+    | Cond      -- ^ Arg1 ? Arg2 : Arg3
       deriving (Eq, Show)
 
+-- |Sum type of all buffers used in a node.
 data Buffer = DBuf [Integer] 
             | IBuf [Instruction]
               deriving (Eq, Show)
 
+-- |
 isDBuf :: Buffer -> Bool
 isDBuf (DBuf _) = True
 isDBuf _        = False
@@ -38,12 +43,15 @@ isIBuf :: Buffer -> Bool
 isIBuf (IBuf _) = True
 isIBuf _        = False
 
+-- |Lifts the given list-processing function on integers to the Buffer type.
 dAp :: ([Integer] -> [Integer]) -> (Buffer -> Buffer)
 dAp f = let g (DBuf xs) = DBuf $ f xs in g
 
+-- |Lifts the given instruction-processing function to the Buffer type.
 iAp :: ([Instruction] -> [Instruction]) -> (Buffer -> Buffer)
 iAp f = let g (IBuf xs) = IBuf $ f xs in g
 
+-- |Fully defines the execution context for a node in the environment graph.
 data Node = Node {
       parent :: Node,
       buffers :: [Buffer],
@@ -88,20 +96,23 @@ pushITo b i =
     in do modInstr b f
           return ()
 
--- |Pops a value from the n'th data buffer. Nothing if it's empty.
-popDFrom :: Integer -> State Node (Maybe Integer)
-popDFrom b = 
-    let f (DBuf xs) = DBuf $ tailSafe xs
-        g (DBuf xs) = headMay xs
-    in liftM g (modData b (f))
-
 -- |Peeks at the front value on the n'th data buffer. Nothing if it's empty.
 peekDFrom :: Integer -> State Node (Maybe Integer)
 peekDFrom b = liftM (\(DBuf xs) -> headMay xs) (modData b (dAp id))
 
+-- |Pops a value from the n'th data buffer. Nothing if it's empty.
+popDFrom :: Integer -> State Node (Maybe Integer)
+popDFrom b = do
+  ret <- peekDFrom b
+  liftM (\(DBuf xs) -> headMay xs) (modData b (iAp tailSafe))
+  return ret
+
 -- |Pops a value from the n'th instruction buffer. Nothing if it's empty.
 popIFrom :: Integer -> State Node (Maybe Instruction)
-popIFrom b = liftM (\(IBuf xs) -> headMay xs) (modInstr b (iAp tailSafe))
+popIFrom b = do
+  ret <- peekIFrom b
+  liftM (\(DBuf xs) -> headMay xs) (modInstr b (iAp tailSafe))
+  return ret
 
 -- |Peeks at the front value on the n'th instruction buffer. Nothing if it's empty.
 peekIFrom :: Integer -> State Node (Maybe Instruction)
@@ -138,7 +149,7 @@ swap :: Integer -> Integer -> [a] -> [a]
 swap 0 n ys = (ys !! (fromIntegral n)):(tail $ take (fromIntegral n) ys) ++ ((head ys):(drop (fromIntegral n) ys))
 swap x n (y:ys) = y:(swap (x-1) (n-1) ys)
 
--- |Executes the target buffer.
+-- |Executes the target buffer. The child process' buffers may be reordered.
 -- TODO: Check execute if I finished it or not...
 execute :: Integer -> State Node ()
 execute b = do
@@ -150,7 +161,14 @@ execute b = do
          dPtr = 0,
          iPtr = 0
         }
-
+{--
+-- |Pops the data buffer to see if non-zero. If so, then pop the instruction buffer until an End is found.
+ifZero :: State Node ()
+ifZero d i = do
+  val <- peekDBuf d
+  if val /= 0
+     then do iCheck <- popIFrom i
+--}          
 -- |Run the provided instruction against the node's context.
 process :: Instruction -> State Node ()
 process i = do

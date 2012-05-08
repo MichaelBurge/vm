@@ -56,7 +56,7 @@ Clones the front of the local data buffer to the destination. If empty, clones t
 *** Execute
 Executes the target instruction buffer using the destination data buffer as local source. Additionally, the instruction and data pointers are reset to 0.
 *** IfZero
-Pop the data buffer and see if it's non-zero. If so, then pop the instruction buffer until an "End" is found.
+Pop the data buffer and see if it's non-zero or empty. If so, then pop the instruction buffer.
 *** Ascend
 Pushes the rest of the source instruction & data buffers into the parent. This kills the current instance, but he is reborn anew into his parent.
 ** Arithmetic Instructions
