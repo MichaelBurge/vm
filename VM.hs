@@ -68,13 +68,22 @@ aAp f (DBuf xs) = f xs
 aAp _ _ = error "bAp applied to non-integral list"
 
 -- |Fully defines the execution context for a node in the environment graph.
-data Node = Node {
+data Node = RootNode | Node {
       parent :: Node,
       buffers :: [Buffer],
       dPtr :: Integer,
       iPtr :: Integer
-}
+} deriving (Eq)
+
+depth :: Node -> Integer
+depth RootNode = 0
+depth n = 1 + depth (parent n)
+instance Show Node where
+    show n = show $ depth n
+
 type NodeS a = State Node a
+
+defaultContext instrs = Node RootNode [IBuf instrs, DBuf []] 0 0
 
 atWrap :: [a] -> Integer -> a
 atWrap xs n = xs !! ((fromIntegral n) `mod` (length xs))
@@ -248,3 +257,6 @@ process i = do
     Or        -> arith 2 (\(a:b:xs) -> a .|. b)
     Xor       -> arith 2 (\(a:b:xs) -> a `xor` b)
     Cond      -> arith 3 (\(a:b:c:xs) -> if a > 0 then b else c)
+
+runProgram :: [Instruction] -> Node
+runProgram instrs = execState (mapM_ process instrs) (defaultContext instrs)
